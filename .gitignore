@@ -18,6 +18,9 @@ build/
 
 # Database (local data)
 db/data.json
+db/local.db
+db/*.db-shm
+db/*.db-wal
 
 # Docs / design files
 design.md
