@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthUser } from '@/lib/auth';
-import { getDailySummaries, getCategorySummaries, getDashboardStats } from '@/lib/db';
+import {
+  getCategorySummaries,
+  getDashboardStats,
+  getMergedDailySummaries,
+  getPeriodTotals,
+} from '@/lib/db';
+import { resolveReportRange, getPeriodLabel } from '@/lib/utils';
 
 export async function GET(req: NextRequest) {
   const user = await getAuthUser();
@@ -14,22 +20,31 @@ export async function GET(req: NextRequest) {
   const to = searchParams.get('to');
 
   const stats = await getDashboardStats(user.id);
-  const dailySummaries = (await getDailySummaries(user.id, 365)).filter(d => {
-    if (from && d.date < from) return false;
-    if (to && d.date > to) return false;
-    return true;
+  const { rangeFrom, rangeTo } = resolveReportRange(type, from || undefined, to || undefined, stats);
+
+  const periodTotals = await getPeriodTotals(user.id, rangeFrom, rangeTo);
+  const mergedDaily = await getMergedDailySummaries(user.id, {
+    from: rangeFrom,
+    to: rangeTo,
+    limit: type === 'bimonthly' && !from && !to ? 400 : 200,
   });
+  const categorySummaries = await getCategorySummaries(user.id, rangeFrom, rangeTo);
 
-  const categorySummaries = await getCategorySummaries(user.id);
-
-  const totalIncome = dailySummaries.reduce((sum, d) => sum + d.income, 0);
-  const totalExpenses = dailySummaries.reduce((sum, d) => sum + d.expenses, 0);
+  const totalIncome = periodTotals.totalIncome;
+  const totalExpenses = periodTotals.totalExpenses;
   const netProfit = totalIncome - totalExpenses;
 
+  const periodLabel = getPeriodLabel(type, rangeFrom, rangeTo, stats);
+
+  const reportTitle =
+    type === 'bimonthly' ? 'Bimonthly Report' :
+    type === 'expense' ? 'Expense Breakdown' :
+    'Period summary (date range optional)';
+
   let csv = 'Milk Truck Manager Report\n';
-  csv += `Generated,${new Date().toLocaleDateString()}\n`;
-  csv += `Report Type,${type === 'bimonthly' ? 'Bimonthly Report' : type === 'daily' ? 'Daily Summary' : 'Expense Breakdown'}\n`;
-  csv += `Period,${from || 'Start'} to ${to || 'Today'}\n`;
+  csv += `Generated,${new Date().toLocaleDateString('en-GB')}\n`;
+  csv += `Report Type,${reportTitle}\n`;
+  csv += `Period,${periodLabel}\n`;
   if (type === 'bimonthly') {
     csv += `Bimonthly Period,${stats.periodLabel}\n`;
   }
@@ -45,18 +60,20 @@ export async function GET(req: NextRequest) {
   csv += 'Summary\n';
   csv += `Total Income,${totalIncome}\n`;
   csv += `Total Expenses,${totalExpenses}\n`;
-  csv += `Net Profit,${netProfit}\n\n`;
+  csv += `Net Profit,${netProfit}\n`;
+  csv += `Liters Delivered,${periodTotals.totalLiters}\n\n`;
 
-  csv += 'Daily Summary\n';
+  csv += 'Activity by date\n';
   csv += 'Date,Income,Expenses,Profit\n';
-  dailySummaries.forEach(d => {
+  mergedDaily.forEach(d => {
     csv += `${d.date},${d.income},${d.expenses},${d.profit}\n`;
   });
 
+  const denom = totalExpenses > 0 ? totalExpenses : categorySummaries.reduce((s, c) => s + c.total, 0);
   csv += '\nExpense Categories\n';
   csv += 'Category,Amount,Percentage\n';
   categorySummaries.forEach(c => {
-    const pct = totalExpenses > 0 ? ((c.total / totalExpenses) * 100).toFixed(1) : 0;
+    const pct = denom > 0 ? ((c.total / denom) * 100).toFixed(1) : '0';
     csv += `${c.name},${c.total},${pct}%\n`;
   });
 

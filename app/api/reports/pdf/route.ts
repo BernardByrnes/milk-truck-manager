@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthUser } from '@/lib/auth';
-import { getDailySummaries, getCategorySummaries, getIncomeByUser, getExpensesByUser, getDashboardStats } from '@/lib/db';
-import { formatCurrency } from '@/lib/utils';
+import {
+  getCategorySummaries,
+  getIncomeByUser,
+  getDashboardStats,
+  getMergedDailySummaries,
+  getPeriodTotals,
+} from '@/lib/db';
+import { formatCurrency, resolveReportRange, getPeriodLabel } from '@/lib/utils';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 
@@ -14,7 +20,6 @@ const GRAY: [number, number, number] = [100, 116, 139];
 const BORDER: [number, number, number] = [226, 232, 240];
 
 function drawHeader(doc: jsPDF, title: string, subtitle: string) {
-  // Teal header band
   doc.setFillColor(...TEAL);
   doc.rect(0, 0, 210, 28, 'F');
 
@@ -27,7 +32,6 @@ function drawHeader(doc: jsPDF, title: string, subtitle: string) {
   doc.setFont('helvetica', 'normal');
   doc.text('Financial Report', 14, 19);
 
-  // Title on right side
   doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
   doc.text(title, 196, 12, { align: 'right' });
@@ -115,65 +119,34 @@ export async function GET(req: NextRequest) {
   const to = searchParams.get('to') || undefined;
 
   const stats = await getDashboardStats(user.id);
+  const { rangeFrom, rangeTo } = resolveReportRange(type, from, to, stats);
 
-  const allDailySummaries = await getDailySummaries(user.id, 365);
-  const dailySummaries = allDailySummaries.filter(d => {
-    if (from && d.date < from) return false;
-    if (to && d.date > to) return false;
-    return true;
+  const periodTotals = await getPeriodTotals(user.id, rangeFrom, rangeTo);
+  const mergedDaily = await getMergedDailySummaries(user.id, {
+    from: rangeFrom,
+    to: rangeTo,
+    limit: type === 'bimonthly' && !from && !to ? 400 : 200,
   });
-
-  const categorySummaries = await getCategorySummaries(user.id);
+  const categorySummaries = await getCategorySummaries(user.id, rangeFrom, rangeTo);
 
   const allIncome = await getIncomeByUser(user.id, 1000);
   const incomeRecords = allIncome.filter(i => {
-    if (from && i.date < from) return false;
-    if (to && i.date > to) return false;
+    if (rangeFrom && i.date < rangeFrom) return false;
+    if (rangeTo && i.date > rangeTo) return false;
     return true;
   });
 
-  const allExpenses = await getExpensesByUser(user.id, 1000);
-  const expenseRecords = allExpenses.filter(e => {
-    if (from && e.date < from) return false;
-    if (to && e.date > to) return false;
-    return true;
-  });
-
-  const totalIncome = dailySummaries.reduce((s, d) => s + d.income, 0);
-  const totalExpenses = dailySummaries.reduce((s, d) => s + d.expenses, 0);
+  const totalIncome = periodTotals.totalIncome;
+  const totalExpenses = periodTotals.totalExpenses;
   const netProfit = totalIncome - totalExpenses;
-  const totalLiters = incomeRecords.reduce((s, i) => s + i.liters, 0);
+  const totalLiters = periodTotals.totalLiters;
 
-  function ordinal(d: number) {
-    const s = ['th', 'st', 'nd', 'rd'];
-    const v = d % 100;
-    return d + (s[(v - 20) % 10] || s[v] || s[0]);
-  }
-  function fmtDate(iso: string) {
-    const dt = new Date(iso + 'T00:00:00');
-    return `${ordinal(dt.getDate())} ${dt.toLocaleDateString('en-US', { month: 'long' })} ${dt.getFullYear()}`;
-  }
-
-  let periodLabel: string;
-  if (type === 'bimonthly' && !from && !to) {
-    periodLabel = stats.periodLabel;
-  } else {
-    const today = new Date();
-    const effectiveFrom = from
-      ? fmtDate(from)
-      : dailySummaries.length > 0
-      ? fmtDate([...dailySummaries].sort((a, b) => a.date.localeCompare(b.date))[0].date)
-      : fmtDate(today.toISOString().split('T')[0]);
-    const effectiveTo = to
-      ? fmtDate(to)
-      : fmtDate(today.toISOString().split('T')[0]);
-    periodLabel = `${effectiveFrom} to ${effectiveTo}`;
-  }
+  const periodLabel = getPeriodLabel(type, rangeFrom, rangeTo, stats);
 
   const reportTitle =
     type === 'bimonthly' ? 'Bimonthly Report' :
     type === 'expense' ? 'Expense Breakdown' :
-    'Monthly Report';
+    'Period Report';
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
 
@@ -181,17 +154,14 @@ export async function GET(req: NextRequest) {
 
   let y = 36;
 
-  // Meta line
   doc.setFontSize(8);
   doc.setTextColor(...GRAY);
   doc.text(`Period: ${periodLabel}`, 14, y);
   y += 8;
 
-  // Summary box
   y = drawSummaryBox(doc, y, totalIncome, totalExpenses, netProfit, totalLiters);
 
   if (type === 'bimonthly') {
-    // Bimonthly breakdown section
     y = drawSectionTitle(doc, y, 'Current Bimonthly Period Breakdown');
 
     (doc as any).autoTable({
@@ -217,10 +187,9 @@ export async function GET(req: NextRequest) {
     y = (doc as any).lastAutoTable.finalY + 8;
   }
 
-  // Daily breakdown table
-  y = drawSectionTitle(doc, y, type === 'bimonthly' ? 'Daily Breakdown for Period' : 'Daily Breakdown');
+  y = drawSectionTitle(doc, y, type === 'bimonthly' ? 'Activity by date (period)' : 'Activity by date');
 
-  const dailyTableData = dailySummaries.slice(0, 60).map(d => [
+  const dailyTableData = mergedDaily.slice(0, 60).map(d => [
     d.date,
     formatCurrency(d.income),
     formatCurrency(d.expenses),
@@ -251,7 +220,6 @@ export async function GET(req: NextRequest) {
 
   y = (doc as any).lastAutoTable.finalY + 8;
 
-  // Expense breakdown section — always included
   if (y > 230) {
     doc.addPage();
     drawHeader(doc, reportTitle, periodLabel);
@@ -260,11 +228,11 @@ export async function GET(req: NextRequest) {
 
   y = drawSectionTitle(doc, y, 'Expense Breakdown by Category');
 
-  const filteredTotalExpenses = expenseRecords.reduce((s, e) => s + e.amount, 0);
+  const expenseDenominator = totalExpenses > 0 ? totalExpenses : categorySummaries.reduce((s, c) => s + c.total, 0);
   const catData = categorySummaries.map(c => [
     c.name,
     formatCurrency(c.total),
-    filteredTotalExpenses > 0 ? `${((c.total / filteredTotalExpenses) * 100).toFixed(1)}%` : '0%',
+    expenseDenominator > 0 ? `${((c.total / expenseDenominator) * 100).toFixed(1)}%` : '0%',
   ]);
 
   (doc as any).autoTable({
@@ -282,7 +250,6 @@ export async function GET(req: NextRequest) {
     margin: { left: 14, right: 14 },
   });
 
-  // Income details section
   y = (doc as any).lastAutoTable.finalY + 8;
   if (y > 230) {
     doc.addPage();
@@ -290,7 +257,7 @@ export async function GET(req: NextRequest) {
     y = 36;
   }
 
-  y = drawSectionTitle(doc, y, 'Income Details (Liters × 200 UGX)');
+  y = drawSectionTitle(doc, y, 'Income Details');
 
   const incomeTableData = incomeRecords.slice(0, 60).map(i => [
     i.date,
@@ -313,7 +280,6 @@ export async function GET(req: NextRequest) {
     margin: { left: 14, right: 14 },
   });
 
-  // Footers on all pages
   const totalPages = (doc as any).internal.getNumberOfPages();
   for (let p = 1; p <= totalPages; p++) {
     doc.setPage(p);

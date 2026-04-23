@@ -19,13 +19,13 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { liters, date } = await req.json();
+    const { liters, date, rate } = await req.json();
 
     if (!liters || liters <= 0) {
       return NextResponse.json({ error: 'Invalid liters value' }, { status: 400 });
     }
 
-    const record = await addIncome(user.id, date || new Date().toISOString().split('T')[0], liters);
+    const record = await addIncome(user.id, date || new Date().toISOString().split('T')[0], liters, rate);
     return NextResponse.json(record, { status: 201 });
   } catch (error) {
     return NextResponse.json({ error: 'Server error' }, { status: 500 });

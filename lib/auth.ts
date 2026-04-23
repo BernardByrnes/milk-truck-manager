@@ -40,28 +40,37 @@ export async function getAuthUser(): Promise<AuthUser | null> {
 }
 
 export async function login(phoneNumber: string, password: string): Promise<{ success: boolean; token?: string; error?: string }> {
-  const user = await getUserByPhone(phoneNumber);
+  const normalized = phoneNumber.trim();
+  const user = await getUserByPhone(normalized);
   if (!user) {
     return { success: false, error: 'User not found' };
   }
-  
-  const valid = await comparePassword(password, user.password_hash);
+
+  const hash = user.password_hash;
+  if (typeof hash !== 'string' || !hash) {
+    return { success: false, error: 'Account data is invalid. Register again or contact support.' };
+  }
+
+  const valid = await comparePassword(password, hash);
   if (!valid) {
     return { success: false, error: 'Invalid password' };
   }
 
-  const token = generateToken({ id: user.id, phone_number: user.phone_number });
+  const id = Number(user.id);
+  const phone = String(user.phone_number ?? normalized);
+  const token = generateToken({ id, phone_number: phone });
   return { success: true, token };
 }
 
 export async function register(phoneNumber: string, password: string): Promise<{ success: boolean; error?: string }> {
-  const existing = await getUserByPhone(phoneNumber);
+  const normalized = phoneNumber.trim();
+  const existing = await getUserByPhone(normalized);
   if (existing) {
     return { success: false, error: 'Phone number already registered' };
   }
 
   const passwordHash = await hashPassword(password);
-  await createUser(phoneNumber, passwordHash);
+  await createUser(normalized, passwordHash);
   return { success: true };
 }
 

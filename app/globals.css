@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+/* Do not put @import (e.g. Google Fonts) after @tailwind — invalid CSS and can break the whole sheet. Use next/font in layout.tsx instead. */
 
 * {
   box-sizing: border-box;
@@ -14,12 +14,6 @@ html,
 body {
   max-width: 100vw;
   overflow-x: hidden;
-  font-family: 'Inter', system-ui, sans-serif;
-}
-
-body {
-  background-color: #F8FAFC;
-  color: #0F172A;
 }
 
 a {

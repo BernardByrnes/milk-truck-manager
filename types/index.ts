@@ -48,6 +48,9 @@ export interface DashboardStats {
   periodExpenses: number;
   periodProfit: number;
   periodLabel: string;
+  /** Inclusive YYYY-MM-DD bounds for the current bimonthly dashboard period */
+  periodFrom: string;
+  periodTo: string;
 }
 
 export interface MonthSummary {

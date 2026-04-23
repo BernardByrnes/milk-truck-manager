@@ -16,7 +16,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       return NextResponse.json({ error: 'Invalid values' }, { status: 400 });
     }
 
-    await updateExpense(parseInt(id), category_id, amount, note);
+    const ok = await updateExpense(parseInt(id), user.id, category_id, amount, note);
+    if (!ok) {
+      return NextResponse.json({ error: 'Record not found or not owned by you' }, { status: 404 });
+    }
     return NextResponse.json({ success: true });
   } catch (error) {
     return NextResponse.json({ error: 'Server error' }, { status: 500 });
@@ -31,7 +34,10 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
 
   try {
     const { id } = await params;
-    await deleteExpense(parseInt(id));
+    const ok = await deleteExpense(parseInt(id), user.id);
+    if (!ok) {
+      return NextResponse.json({ error: 'Record not found or not owned by you' }, { status: 404 });
+    }
     return NextResponse.json({ success: true });
   } catch (error) {
     return NextResponse.json({ error: 'Server error' }, { status: 500 });

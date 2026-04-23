@@ -9,15 +9,19 @@ import { Input, Select } from '@/components/Input';
 import { formatCurrency, formatDate, getTodayDate } from '@/lib/utils';
 import { Income } from '@/types';
 
+const DEFAULT_RATE = 200;
+
 export default function IncomePage() {
   const router = useRouter();
   const [records, setRecords] = useState<Income[]>([]);
   const [loading, setLoading] = useState(true);
   const [liters, setLiters] = useState('');
+  const [rate, setRate] = useState(DEFAULT_RATE);
   const [date, setDate] = useState(getTodayDate());
   const [submitting, setSubmitting] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editLiters, setEditLiters] = useState('');
+  const [editDate, setEditDate] = useState('');
 
   useEffect(() => {
     fetchRecords();
@@ -38,15 +42,15 @@ export default function IncomePage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!liters || parseFloat(liters) <= 0) return;
-    
+
     setSubmitting(true);
     try {
       const res = await fetch('/api/income', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ liters: parseFloat(liters), date }),
+        body: JSON.stringify({ liters: parseFloat(liters), date, rate }),
       });
-      
+
       if (res.ok) {
         setLiters('');
         setDate(getTodayDate());
@@ -59,15 +63,16 @@ export default function IncomePage() {
 
   const handleUpdate = async (id: number) => {
     if (!editLiters || parseFloat(editLiters) <= 0) return;
-    
+
     try {
       await fetch(`/api/income/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ liters: parseFloat(editLiters) }),
+        body: JSON.stringify({ liters: parseFloat(editLiters), date: editDate || undefined }),
       });
       setEditingId(null);
       setEditLiters('');
+      setEditDate('');
       fetchRecords();
     } catch (err) {
       console.error(err);
@@ -76,7 +81,7 @@ export default function IncomePage() {
 
   const handleDelete = async (id: number) => {
     if (!confirm('Delete this income record?')) return;
-    
+
     try {
       await fetch(`/api/income/${id}`, { method: 'DELETE' });
       fetchRecords();
@@ -93,17 +98,19 @@ export default function IncomePage() {
     );
   }
 
+  const currentRate = rate || DEFAULT_RATE;
+
   return (
     <div className="min-h-screen pb-20 md:pb-8">
       <TopBar />
-      
+
       <main className="max-w-[1200px] mx-auto px-4 py-6">
         <h1 className="text-xl font-semibold text-text-primary mb-6">Income</h1>
 
         <Card className="mb-6">
           <h2 className="text-md font-semibold text-text-primary mb-4">Add Daily Income</h2>
           <p className="text-sm text-text-secondary mb-4">
-            Rate: 200 UGX per liter. Income = Liters × 200
+            Income = Liters × Rate (UGX)
           </p>
           <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-4">
             <Input
@@ -115,6 +122,14 @@ export default function IncomePage() {
               step="0.1"
               required
               className="flex-1"
+            />
+            <Input
+              type="number"
+              placeholder="Rate (UGX/L)"
+              value={rate}
+              onChange={e => setRate(parseInt(e.target.value) || DEFAULT_RATE)}
+              min="1"
+              className="sm:w-28"
             />
             <Input
               type="date"
@@ -129,7 +144,7 @@ export default function IncomePage() {
           </form>
           {liters && parseFloat(liters) > 0 && (
             <p className="mt-3 text-sm text-success font-medium">
-              Calculated Income: {formatCurrency(parseFloat(liters) * 200)}
+              Calculated Income: {formatCurrency(parseFloat(liters) * currentRate)}
             </p>
           )}
         </Card>
@@ -141,7 +156,7 @@ export default function IncomePage() {
               <div key={record.id} className="flex flex-col sm:flex-row sm:items-center justify-between py-3 border-b border-border last:border-0 gap-2">
                 <div className="flex-1">
                   <p className="text-sm text-text-primary">{formatDate(record.date)}</p>
-                  <p className="text-xs text-text-secondary">{record.liters} liters</p>
+                  <p className="text-xs text-text-secondary">{record.liters} liters × {record.rate} UGX/L</p>
                 </div>
                 <div className="flex items-center gap-3">
                   {editingId === record.id ? (
@@ -154,13 +169,19 @@ export default function IncomePage() {
                         step="0.1"
                         className="w-28"
                       />
+                      <Input
+                        type="date"
+                        value={editDate}
+                        onChange={e => setEditDate(e.target.value)}
+                        className="w-36"
+                      />
                       <Button size="sm" onClick={() => handleUpdate(record.id)}>Save</Button>
                       <Button size="sm" variant="secondary" onClick={() => setEditingId(null)}>Cancel</Button>
                     </>
                   ) : (
                     <>
                       <p className="text-success font-semibold">{formatCurrency(record.total_amount)}</p>
-                      <Button size="sm" variant="secondary" onClick={() => { setEditingId(record.id); setEditLiters(record.liters.toString()); }}>Edit</Button>
+                      <Button size="sm" variant="secondary" onClick={() => { setEditingId(record.id); setEditLiters(record.liters.toString()); setEditDate(record.date); }}>Edit</Button>
                       <Button size="sm" variant="danger" onClick={() => handleDelete(record.id)}>Delete</Button>
                     </>
                   )}

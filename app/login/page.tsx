@@ -1,13 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { Card } from '@/components/Card';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 
 export default function LoginPage() {
-  const router = useRouter();
   const [isRegister, setIsRegister] = useState(false);
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
@@ -25,13 +23,25 @@ export default function LoginPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone_number: phone, password }),
+        credentials: 'same-origin',
+        cache: 'no-store',
       });
 
-      const data = await res.json();
+      const raw = await res.text();
+      let data: { error?: string } = {};
+      if (raw) {
+        try {
+          data = JSON.parse(raw) as { error?: string };
+        } catch {
+          setError(
+            `The server sent a non-JSON response (${res.status}). Often this means the API crashed — check the terminal where npm run dev is running.`
+          );
+          return;
+        }
+      }
 
       if (!res.ok) {
-        setError(data.error || 'Something went wrong');
-        setLoading(false);
+        setError(data.error || `Request failed (${res.status})`);
         return;
       }
 
@@ -41,13 +51,21 @@ export default function LoginPage() {
         setPassword('');
         alert('Registration successful! Please log in.');
       } else {
-        router.push('/dashboard');
-        router.refresh();
+        // Full navigation so the new httpOnly cookie is always sent on the next load
+        window.location.assign('/dashboard');
+        return;
       }
-    } catch {
-      setError('Network error. Please try again.');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const looksOffline = /failed to fetch|networkerror|load failed|fetch/i.test(msg);
+      setError(
+        looksOffline
+          ? 'Cannot reach the server. Confirm npm run dev is running and you are opening the same host/port (e.g. http://localhost:3000).'
+          : msg
+      );
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   return (
