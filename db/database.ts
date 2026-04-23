@@ -284,6 +284,26 @@ export async function getDashboardStats(userId: number): Promise<any> {
   };
 }
 
+export async function getPreviousPeriodTotals(
+  userId: number,
+  currentFrom: string,
+  currentTo: string
+): Promise<{ totalIncome: number; totalExpenses: number; totalLiters: number }> {
+  await initDb();
+  const db = getClient();
+
+  const from = new Date(currentFrom + 'T00:00:00');
+  const to = new Date(currentTo + 'T00:00:00');
+  const spanMs = to.getTime() - from.getTime() + 24 * 60 * 60 * 1000;
+  const prevTo = new Date(from.getTime() - 1 * 24 * 60 * 60 * 1000);
+  const prevFrom = new Date(prevTo.getTime() - spanMs + 24 * 60 * 60 * 1000);
+
+  const prevFromStr = toLocalISOString(prevFrom);
+  const prevToStr = toLocalISOString(prevTo);
+
+  return getPeriodTotals(userId, prevFromStr, prevToStr);
+}
+
 /** Income, expense, and liter totals for an optional inclusive date range (YYYY-MM-DD). */
 export async function getPeriodTotals(
   userId: number,
@@ -458,19 +478,51 @@ export async function getInsights(userId: number): Promise<any[]> {
   const weekAgo = toLocalISOString(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
   const monthStart = today.substring(0, 7) + '-01';
 
-  const [mInc, mExp] = await Promise.all([
+  const lastMonthDate = new Date();
+  lastMonthDate.setMonth(lastMonthDate.getMonth() - 1);
+  const lastMonthStart = toLocalISOString(lastMonthDate).substring(0, 7) + '-01';
+  const lastMonthEnd = toLocalISOString(new Date(lastMonthDate.getFullYear(), lastMonthDate.getMonth() + 1, 0));
+
+  const [mInc, mExp, lmInc, lmExp] = await Promise.all([
     db.execute({ sql: 'SELECT COALESCE(SUM(total_amount),0) as v FROM income WHERE user_id=? AND date>=?', args: [userId, monthStart] }),
     db.execute({ sql: 'SELECT COALESCE(SUM(amount),0) as v FROM expenses WHERE user_id=? AND date>=?', args: [userId, monthStart] }),
+    db.execute({ sql: 'SELECT COALESCE(SUM(total_amount),0) as v FROM income WHERE user_id=? AND date>=? AND date<=?', args: [userId, lastMonthStart, lastMonthEnd] }),
+    db.execute({ sql: 'SELECT COALESCE(SUM(amount),0) as v FROM expenses WHERE user_id=? AND date>=? AND date<=?', args: [userId, lastMonthStart, lastMonthEnd] }),
   ]);
 
   const monthIncome = Number((mInc.rows[0] as any).v);
   const monthExpenses = Number((mExp.rows[0] as any).v);
   const profit = monthIncome - monthExpenses;
+  const lastMonthIncome = Number((lmInc.rows[0] as any).v);
+  const lastMonthExpenses = Number((lmExp.rows[0] as any).v);
 
   if (monthExpenses > monthIncome && monthIncome > 0) {
     insights.push({ type: 'danger', message: 'You are spending more than you earn this month' });
   } else if (profit < 0) {
     insights.push({ type: 'danger', message: 'You are operating at a loss this month' });
+  }
+
+  if (monthIncome > 0 && lastMonthIncome > 0) {
+    const incomeChange = Math.round(((monthIncome - lastMonthIncome) / lastMonthIncome) * 100);
+    if (incomeChange <= -20) {
+      insights.push({ type: 'warning', message: `Income dropped ${Math.abs(incomeChange)}% vs. last month` });
+    } else if (incomeChange >= 20) {
+      insights.push({ type: 'info', message: `Income grew ${incomeChange}% vs. last month` });
+    }
+  }
+
+  if (lastMonthExpenses > 0 && monthExpenses > 0) {
+    const expChange = Math.round(((monthExpenses - lastMonthExpenses) / lastMonthExpenses) * 100);
+    if (expChange >= 30) {
+      insights.push({ type: 'warning', message: `Expenses surged ${expChange}% vs. last month` });
+    }
+  }
+
+  if (monthIncome > 0 && monthExpenses > 0) {
+    const ratio = Math.round((monthExpenses / monthIncome) * 100);
+    if (ratio > 70 && ratio <= 100) {
+      insights.push({ type: 'warning', message: `Expense ratio is ${ratio}% of income — consider cutting costs` });
+    }
   }
 
   const [fuelResult, weekExpResult] = await Promise.all([
@@ -489,6 +541,29 @@ export async function getInsights(userId: number): Promise<any[]> {
   const weekExpenses = Number((weekExpResult.rows[0] as any).v);
   if (weekExpenses > 0 && fuelExpenses > 0.5 * weekExpenses) {
     insights.push({ type: 'warning', message: 'Fuel costs are over half your expenses this week' });
+  }
+
+  const [mLiters, lmLiters] = await Promise.all([
+    db.execute({ sql: 'SELECT COALESCE(SUM(liters),0) as v FROM income WHERE user_id=? AND date>=?', args: [userId, monthStart] }),
+    db.execute({ sql: 'SELECT COALESCE(SUM(liters),0) as v FROM income WHERE user_id=? AND date>=? AND date<=?', args: [userId, lastMonthStart, lastMonthEnd] }),
+  ]);
+  const monthLiters = Number((mLiters.rows[0] as any).v);
+  const lastMonthLiters = Number((lmLiters.rows[0] as any).v);
+  if (lastMonthLiters > 0 && monthLiters > 0) {
+    const literChange = Math.round(((monthLiters - lastMonthLiters) / lastMonthLiters) * 100);
+    if (literChange <= -20) {
+      insights.push({ type: 'warning', message: `Liters delivered dropped ${Math.abs(literChange)}% vs. last month` });
+    } else if (literChange >= 20) {
+      insights.push({ type: 'info', message: `Liters delivered up ${literChange}% vs. last month` });
+    }
+  }
+
+  const monthSummaries = await getMonthlySummaries(userId, 3);
+  if (monthSummaries.length >= 3) {
+    const recent3 = monthSummaries.slice(0, 3);
+    if (recent3.every(m => m.profit < 0)) {
+      insights.push({ type: 'danger', message: 'You have been operating at a loss for 3 consecutive months' });
+    }
   }
 
   const topCat = await getCategorySummaries(userId);

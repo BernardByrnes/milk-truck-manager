@@ -17,5 +17,6 @@ export {
   getMonthlySummaries,
   getCategorySummaries,
   getPeriodTotals,
+  getPreviousPeriodTotals,
   getInsights,
 } from '@/db/database';

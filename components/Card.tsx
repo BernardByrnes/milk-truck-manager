@@ -23,15 +23,16 @@ interface StatCardProps {
   value: string;
   subValue?: string;
   type?: 'default' | 'success' | 'danger';
+  badge?: React.ReactNode;
 }
 
-export function StatCard({ label, value, subValue, type = 'default' }: StatCardProps) {
+export function StatCard({ label, value, subValue, type = 'default', badge }: StatCardProps) {
   const valueColor = type === 'success' ? 'text-success' : type === 'danger' ? 'text-danger' : 'text-text-primary';
-  
+
   return (
     <Card className="hover:shadow-card-hover transition-shadow duration-200">
       <p className="text-sm text-text-secondary mb-1">{label}</p>
-      <p className={`text-xl lg:text-2xl font-bold ${valueColor}`}>{value}</p>
+      <p className={`text-xl lg:text-2xl font-bold ${valueColor}`}>{value}{badge}</p>
       {subValue && <p className="text-xs text-text-secondary mt-1">{subValue}</p>}
     </Card>
   );

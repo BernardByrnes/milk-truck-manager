@@ -8,6 +8,7 @@ import { Button } from '@/components/Button';
 import { Input, Select } from '@/components/Input';
 import { formatCurrency, getCurrentBimonthlyRange, getMonthRange } from '@/lib/utils';
 import { DailySummary, CategorySummary } from '@/types';
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
 type ReportType = 'daily' | 'expense' | 'bimonthly';
 
@@ -16,6 +17,8 @@ const REPORT_TYPE_OPTIONS = [
   { value: 'bimonthly', label: 'Bimonthly Report' },
   { value: 'expense', label: 'Expense Breakdown' },
 ];
+
+const PIE_COLORS = ['#0EA5A4', '#EF4444', '#F59E0B', '#3B82F6', '#8B5CF6', '#EC4899', '#14B8A6', '#F97316'];
 
 export default function ReportsPage() {
   const router = useRouter();
@@ -147,6 +150,7 @@ export default function ReportsPage() {
   const totalIncome = periodTotals.totalIncome;
   const totalExpenses = periodTotals.totalExpenses;
   const netProfit = totalIncome - totalExpenses;
+  const profitMargin = totalIncome > 0 ? ((netProfit / totalIncome) * 100).toFixed(1) : null;
 
   if (loading) {
     return (
@@ -227,26 +231,32 @@ export default function ReportsPage() {
               <span className="text-xs text-accent font-medium">{periodLabel}</span>
             )}
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-            <div className="text-center p-4 bg-green-50 rounded-lg">
-              <p className="text-sm text-text-secondary mb-1">Total Income</p>
-              <p className="text-lg sm:text-xl font-bold text-success break-all">{formatCurrency(totalIncome)}</p>
-            </div>
-            <div className="text-center p-4 bg-red-50 rounded-lg">
-              <p className="text-sm text-text-secondary mb-1">Total Expenses</p>
-              <p className="text-lg sm:text-xl font-bold text-danger break-all">{formatCurrency(totalExpenses)}</p>
-            </div>
-            <div className={`text-center p-4 rounded-lg ${netProfit >= 0 ? 'bg-green-50' : 'bg-red-50'}`}>
-              <p className="text-sm text-text-secondary mb-1">Net Profit</p>
-              <p className={`text-lg sm:text-xl font-bold ${netProfit >= 0 ? 'text-success' : 'text-danger'} break-all`}>
-                {formatCurrency(netProfit)}
-              </p>
-            </div>
-            <div className="text-center p-4 bg-blue-50 rounded-lg">
-              <p className="text-sm text-text-secondary mb-1">Liters Delivered</p>
-              <p className="text-lg sm:text-xl font-bold text-accent break-all">{periodTotals.totalLiters.toFixed(0)} L</p>
-            </div>
-          </div>
+      <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
+        <div className="text-center p-4 bg-green-50 rounded-lg">
+          <p className="text-sm text-text-secondary mb-1">Total Income</p>
+          <p className="text-lg sm:text-xl font-bold text-success break-all">{formatCurrency(totalIncome)}</p>
+        </div>
+        <div className="text-center p-4 bg-red-50 rounded-lg">
+          <p className="text-sm text-text-secondary mb-1">Total Expenses</p>
+          <p className="text-lg sm:text-xl font-bold text-danger break-all">{formatCurrency(totalExpenses)}</p>
+        </div>
+        <div className={`text-center p-4 rounded-lg ${netProfit >= 0 ? 'bg-green-50' : 'bg-red-50'}`}>
+          <p className="text-sm text-text-secondary mb-1">Net Profit</p>
+          <p className={`text-lg sm:text-xl font-bold ${netProfit >= 0 ? 'text-success' : 'text-danger'} break-all`}>
+            {formatCurrency(netProfit)}
+          </p>
+        </div>
+        <div className="text-center p-4 bg-blue-50 rounded-lg">
+          <p className="text-sm text-text-secondary mb-1">Liters Delivered</p>
+          <p className="text-lg sm:text-xl font-bold text-accent break-all">{periodTotals.totalLiters.toFixed(0)} L</p>
+        </div>
+        <div className={`text-center p-4 rounded-lg ${profitMargin && Number(profitMargin) >= 0 ? 'bg-green-50' : 'bg-red-50'}`}>
+          <p className="text-sm text-text-secondary mb-1">Profit Margin</p>
+          <p className={`text-lg sm:text-xl font-bold ${profitMargin && Number(profitMargin) >= 0 ? 'text-success' : 'text-danger'} break-all`}>
+            {profitMargin ? `${profitMargin}%` : 'N/A'}
+          </p>
+        </div>
+      </div>
         </Card>
 
         <div className="grid md:grid-cols-2 gap-6">
@@ -274,27 +284,53 @@ export default function ReportsPage() {
             </Card>
           )}
 
-          <Card className={reportType === 'expense' ? 'md:col-span-2 ring-2 ring-accent/20' : ''}>
-            <h2 className="text-md font-semibold text-text-primary mb-4">Expenses by Category</h2>
-            <div className="space-y-2 max-h-[400px] overflow-y-auto">
-              {categorySummaries.map(cat => {
-                const denom = totalExpenses > 0 ? totalExpenses : categorySummaries.reduce((s, c) => s + c.total, 0);
-                const pct = denom > 0 ? ((cat.total / denom) * 100).toFixed(1) : '0';
-                return (
-                  <div key={cat.name} className="flex flex-col sm:flex-row sm:items-center justify-between py-2 border-b border-border last:border-0 gap-1">
-                    <div>
-                      <span className="text-sm text-text-primary">{cat.name}</span>
-                      <span className="ml-2 text-xs text-text-secondary">{pct}%</span>
+        <Card className={reportType === 'expense' ? 'md:col-span-2 ring-2 ring-accent/20' : ''}>
+          <h2 className="text-md font-semibold text-text-primary mb-4">Expenses by Category</h2>
+          {categorySummaries.length > 0 ? (
+            <div className="flex flex-col md:flex-row gap-4">
+              <div className="w-full md:w-1/2 h-[250px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={categorySummaries}
+                      dataKey="total"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={50}
+                      outerRadius={90}
+                      paddingAngle={2}
+                    >
+                      {categorySummaries.map((_, i) => (
+                        <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                    <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: '12px' }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="w-full md:w-1/2 space-y-2 max-h-[250px] overflow-y-auto">
+                {categorySummaries.map((cat, i) => {
+                  const denom = totalExpenses > 0 ? totalExpenses : categorySummaries.reduce((s, c) => s + c.total, 0);
+                  const pct = denom > 0 ? ((cat.total / denom) * 100).toFixed(1) : '0';
+                  return (
+                    <div key={cat.name} className="flex items-center gap-2 py-2 border-b border-border last:border-0">
+                      <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }} />
+                      <div className="flex-1 min-w-0">
+                        <span className="text-sm text-text-primary truncate block">{cat.name}</span>
+                      </div>
+                      <span className="text-xs text-text-secondary shrink-0">{pct}%</span>
+                      <span className="text-danger font-semibold text-sm shrink-0">{formatCurrency(cat.total)}</span>
                     </div>
-                    <span className="text-danger font-semibold break-all">{formatCurrency(cat.total)}</span>
-                  </div>
-                );
-              })}
-              {categorySummaries.length === 0 && (
-                <p className="text-sm text-text-secondary text-center py-4">No expense data yet</p>
-              )}
+                  );
+                })}
+              </div>
             </div>
-          </Card>
+          ) : (
+            <p className="text-sm text-text-secondary text-center py-4">No expense data yet</p>
+          )}
+        </Card>
         </div>
       </main>
 
